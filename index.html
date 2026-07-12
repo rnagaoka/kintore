@@ -97,6 +97,7 @@
     .tag{font-size:.6rem;padding:1px 6px}
     .chip{padding:4px 11px;font-size:.78rem}
     footer{font-size:.65rem}
+    .hs{display:none}
   }
   .grade{display:flex;align-items:center;gap:14px;margin-bottom:14px}
   .grade-badge{font-size:2rem;font-weight:800;width:64px;height:64px;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0}
@@ -125,16 +126,18 @@
   <input type="file" accept=".csv,text/csv,text/comma-separated-values,application/csv">
 </label>
 
-<div class="cards" id="cards"></div>
+<div class="panel">
+  <h2>🏋️ よくやっているトレーニング</h2>
+  <div id="exSummary"></div>
+</div>
 
 <div class="panel">
   <h2>💪 トレーナー分析</h2>
   <div class="grade" id="grade"></div>
-  <div id="rx"></div>
   <div id="balance"></div>
   <div class="row2" style="gap:20px;margin-top:4px">
     <div id="goods"></div>
-    <div id="issues"></div>
+    <div id="rx"></div>
   </div>
 </div>
 
@@ -473,19 +476,33 @@ function render(){
   const dates=[...new Set(rows.map(r=>r.date))].sort();
   const parts=[...new Set(rows.map(r=>r.part))];
   const strength=rows.filter(r=>r.part!=="有酸素");
-  const totalVol=strength.reduce((s,r)=>s+r.vol,0);
-  const cardioMin=rows.filter(r=>r.part==="有酸素").reduce((s,r)=>s+r.min,0);
-  const maxW={}; strength.forEach(r=>{ if(r.wt>(maxW[r.ex]||0)) maxW[r.ex]=r.wt; });
 
   document.getElementById("period").textContent =
     dates.length?`${dates[0]} 〜 ${dates[dates.length-1]}(${dates.length}日間のトレーニング)`:"";
 
-  document.getElementById("cards").innerHTML = `
-    <div class="card"><div class="label">トレーニング日数</div><div class="value">${dates.length}<span class="unit">日</span></div></div>
-    <div class="card"><div class="label">総セット数</div><div class="value">${fmt(strength.length)}<span class="unit">set</span></div></div>
-    <div class="card"><div class="label">総ボリューム</div><div class="value">${fmt(Math.round(totalVol))}<span class="unit">kg</span></div></div>
-    <div class="card"><div class="label">有酸素運動</div><div class="value">${fmt(cardioMin)}<span class="unit">分</span></div></div>
-    <div class="card"><div class="label">ベンチプレスMAX</div><div class="value">${maxW["ベンチプレス"]||"-"}<span class="unit">kg</span></div></div>`;
+  // 種目別サマリー(よくやる順)
+  const sum={};
+  strength.forEach(r=>{
+    if(!sum[r.ex]) sum[r.ex]={ex:r.ex,part:r.part,days:new Set(),wt:0,reps:0};
+    const s=sum[r.ex]; s.days.add(r.date);
+    if(r.wt>s.wt||(r.wt===s.wt&&r.reps>s.reps)){s.wt=r.wt;s.reps=r.reps;}
+  });
+  const exRows=Object.values(sum).map(s=>{
+    const ld=[...s.days].sort().pop();
+    const dr=strength.filter(r=>r.ex===s.ex&&r.date===ld);
+    const w=Math.max(...dr.map(r=>r.wt));
+    const rp=Math.max(...dr.filter(r=>r.wt===w).map(r=>r.reps));
+    return {...s,n:s.days.size,ld,last:`${w}kg×${rp}`};
+  }).sort((a,b)=>b.n-a.n||b.wt-a.wt).slice(0,10)
+    .map(s=>`<tr><td class="ex-name"><span class="tag" style="background:${colorOf(s.part)};margin-right:6px">${s.part}</span>${s.ex}</td><td style="text-align:center">${s.n}日</td><td>${s.wt}kg×${s.reps}</td><td class="sets hs">${short(s.ld)} ${s.last}</td></tr>`);
+  const cd={};
+  rows.filter(r=>r.part==="有酸素").forEach(r=>{
+    if(!cd[r.ex]) cd[r.ex]={days:new Set(),min:0};
+    cd[r.ex].days.add(r.date); cd[r.ex].min+=r.min;
+  });
+  Object.entries(cd).forEach(([ex,c])=>exRows.push(`<tr><td class="ex-name"><span class="tag" style="background:${colorOf("有酸素")};margin-right:6px">有酸素</span>${ex}</td><td style="text-align:center">${c.days.size}日</td><td>計${c.min}分</td><td class="sets hs">${short([...c.days].sort().pop())}</td></tr>`));
+  document.getElementById("exSummary").innerHTML=
+    `<table><thead><tr><th>種目</th><th style="text-align:center">実施</th><th>ベスト</th><th class="hs">直近</th></tr></thead><tbody>${exRows.join("")}</tbody></table>`;
 
   renderAnalysis(dates);
 
@@ -558,14 +575,14 @@ function render(){
 // --- トレーナー分析(ルールベース) ---
 function renderAnalysis(dates){
   const gEl=document.getElementById("grade"),rxEl=document.getElementById("rx"),
-        balEl=document.getElementById("balance"),goodEl=document.getElementById("goods"),issEl=document.getElementById("issues");
+        balEl=document.getElementById("balance"),goodEl=document.getElementById("goods");
   const st=rows.filter(r=>r.part!=="有酸素");
   const avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:0;
   const goods=[],issues=[],rx=[];
 
   if(dates.length<2){
-    gEl.innerHTML="";rxEl.innerHTML="";balEl.innerHTML="";goodEl.innerHTML="";
-    issEl.innerHTML="2日分以上の記録が集まると分析を表示します。";
+    gEl.innerHTML="";rxEl.innerHTML="";balEl.innerHTML="";
+    goodEl.innerHTML="2日分以上の記録が集まると分析を表示します。";
     return;
   }
 
@@ -582,10 +599,12 @@ function renderAnalysis(dates){
 
   // ボリューム傾向
   const dayVol=dates.map(d=>st.filter(r=>r.date===d).reduce((s,r)=>s+r.vol,0));
+  let trendTxt="。";
   if(dates.length>=4){
     const h=Math.floor(dates.length/2),a=avg(dayVol.slice(0,h)),b=avg(dayVol.slice(-h)),pct=a>0?(b-a)/a*100:0;
-    if(pct>10) goods.push({t:`セッションボリューム +${Math.round(pct)}%`,d:`平均${Math.round(a).toLocaleString()}kg → ${Math.round(b).toLocaleString()}kg。漸進性過負荷が機能。`});
-    else if(pct<-15) issues.push({t:`セッションボリューム -${Math.abs(Math.round(pct))}%`,d:"意図したディロードでなければ原因の確認を。"});
+    if(pct>10){trendTxt="で、量は右肩上がり。";goods.push({t:`セッションボリューム +${Math.round(pct)}%`,d:`平均${Math.round(a).toLocaleString()}kg → ${Math.round(b).toLocaleString()}kg。順調に伸びている。`});}
+    else if(pct<-15){trendTxt="で、量は減少気味。";issues.push({t:`セッションボリューム -${Math.abs(Math.round(pct))}%`,d:"意図したディロードでなければ原因の確認を。"});}
+    else trendTxt="で、量は横ばい。";
   }
 
   // 部位別 週セット数
@@ -630,33 +649,36 @@ function renderAnalysis(dates){
   const cardioWk=rows.filter(r=>r.part==="有酸素").reduce((s,r)=>s+r.min,0)/weeks;
   if(cardioWk>=20) goods.push({t:`有酸素 週${Math.round(cardioWk)}分`,d:"回復促進・心肺維持に十分。"});
 
-  // 今週の処方箋(優先順)
+  // これからやること(優先順)
+  if(freq<1.5) rx.push({t:"週2回の固定枠を確保",d:"曜日を決めて短時間でも実施。まず継続の土台づくりから。"});
   if(plateau.length){
     const main=[...plateau].sort((a,b)=>b.wt-a.wt)[0];
     const back=Math.round(main.wt*0.9/2.5)*2.5;
-    rx.push({t:`${main.ex}: ${back}kg×5回×5setを2〜3週やり込む`,d:`推定1RMは${main.e1}kg。その後${main.wt}kgに戻り、まず回数+1から更新。以後は2.5kg刻みで微増。`});
+    rx.push({t:`${main.ex}: ${back}kg×5回×5setを2〜3週`,d:`その後${main.wt}kgに戻り、まず回数+1から更新。以後は2.5kg刻みで微増。`});
     const rest=plateau.filter(p=>p!==main);
-    if(rest.length) rx.push({t:`${rest.map(p=>p.ex).join("・")}: ダブルプログレッション`,d:"同重量のまま毎回+1回(8→12回)。12回に達したら重量を一段階上げる。自重系種目は加重へ移行。"});
+    if(rest.length) rx.push({t:`${rest.map(p=>p.ex).join("・")}: 回数を+1ずつ`,d:"同重量で8→12回まで増やし、達したら重量を一段階アップ。自重系は加重へ。"});
   }
-  if(low.length||mid.length) rx.push({t:`${[...low,...mid].join("・")}を週10setに引き上げ`,d:"「胸+腕 → 背中+肩 → 脚 → 休み」の3分割ローテへ。1部位1回は10〜15setに抑え、余剰分は頻度に回す。"});
-  if(fixed) rx.push({t:"トップセットだけ記録更新を狙う",d:"各種目の最重量セットのみ8〜12回で全力。前回の記録を確認してから挑む。残りのセットは10回で揃えてOK。"});
-  if(cardioWk<20) rx.push({t:"脚トレ翌日に20分のウォーキング",d:"血流を促して回復を早める。追い込む必要はない。"});
-  if(!rx.length) rx.push({t:"現状維持+2.5kgの微増",d:"大きな問題なし。各種目のトップセットを2.5kg刻みで伸ばし続ける。"});
-  rxEl.innerHTML=`<h3 class="mini">📋 今週の処方箋(優先順)</h3>`+rx.slice(0,4).map((r,i)=>`<div class="rx-item"><div class="rx-num">${i+1}</div><div><div class="t">${r.t}</div><div class="d">${r.d}</div></div></div>`).join("");
+  if(low.length||mid.length) rx.push({t:`${[...low,...mid].join("・")}を週10setへ`,d:"「胸+腕 → 背中+肩 → 脚 → 休み」の3分割ローテに。1部位1回は10〜15setまで。"});
+  if(fixed) rx.push({t:"トップセットだけ記録更新を狙う",d:"最重量セットのみ8〜12回で全力。残りは10回で揃えてOK。"});
+  if(cardioWk<20) rx.push({t:"脚トレ翌日に20分のウォーキング",d:"血流を促して回復を早める。"});
+  if(!rx.length) rx.push({t:"現状維持+2.5kgの微増",d:"大きな問題なし。トップセットを2.5kg刻みで伸ばし続ける。"});
+  rxEl.innerHTML=`<h3 class="mini">👉 これからやること</h3>`+rx.slice(0,3).map((r,i)=>`<div class="rx-item"><div class="rx-num">${i+1}</div><div><div class="t">${r.t}</div><div class="d">${r.d}</div></div></div>`).join("");
 
-  // 良い点・課題
-  goodEl.innerHTML=`<h3 class="mini">✅ できていること</h3>`+(goods.map(g=>`<div class="mini-item"><span class="ic">✅</span><div><strong>${g.t}</strong><div class="mi-d">${g.d}</div></div></div>`).join("")||`<div class="mi-d">まだありません</div>`);
-  issEl.innerHTML=`<h3 class="mini">⚠️ 改善ポイント</h3>`+(issues.map(g=>`<div class="mini-item"><span class="ic">⚠️</span><div><strong>${g.t}</strong><div class="mi-d">${g.d}</div></div></div>`).join("")||`<div class="mi-d">特になし。素晴らしい状態。</div>`);
+  // できていること
+  goodEl.innerHTML=`<h3 class="mini">✅ できていること</h3>`+(goods.slice(0,3).map(g=>`<div class="mini-item"><span class="ic">✅</span><div><strong>${g.t}</strong><div class="mi-d">${g.d}</div></div></div>`).join("")||`<div class="mi-d">まだありません。まず継続から。</div>`);
 
-  // 総合評価
+  // 総合評価と全体の状況
   const w=issues.length,gd=goods.length;
   let gr,gc,gt;
   if(w===0&&gd>=4){gr="S";gc="#66bb6a";gt="ほぼ完璧。このまま継続を。";}
   else if(w<=1){gr="A";gc="#66bb6a";gt="良い状態。あと一歩でS。";}
-  else if(w<=4){gr="B+";gc="#ffb74d";gt="継続と伸びは合格点。処方箋を上から順に実行を。";}
-  else if(w<=6){gr="B";gc="#ffb74d";gt="土台はある。改善ポイントを半分に減らそう。";}
-  else{gr="C";gc="#ef5350";gt="まず頻度と部位バランスの立て直しから。";}
-  gEl.innerHTML=`<div class="grade-badge" style="background:${gc}">${gr}</div><div class="grade-text">総合評価<br><strong style="color:var(--text)">${gt}</strong></div>`;
+  else if(w<=4){gr="B+";gc="#ffb74d";gt="継続と伸びは合格点。";}
+  else if(w<=6){gr="B";gc="#ffb74d";gt="土台はある。やることを1つずつ。";}
+  else{gr="C";gc="#ef5350";gt="まず頻度とバランスの立て直しから。";}
+  const partSets={};PARTS.forEach(p=>partSets[p]=st.filter(r=>r.part===p).length);
+  const top2=Object.entries(partSets).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]).slice(0,2).map(e=>e[0]);
+  const situation=`週${freq.toFixed(1)}回ペースで${top2.join("・")}が中心${trendTxt}`;
+  gEl.innerHTML=`<div class="grade-badge" style="background:${gc}">${gr}</div><div class="grade-text"><strong style="color:var(--text)">${gt}</strong><br>${situation}</div>`;
 }
 
 function drawEx(ex,dates){

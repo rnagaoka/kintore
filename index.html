@@ -503,6 +503,8 @@
 <script>
 const PART_COLORS = {"胸":"#f06292","背中":"#4f8ef7","肩":"#ffb74d","腕":"#ba68c8","脚":"#66bb6a","有酸素":"#4dd0e1"};
 const colorOf = p => PART_COLORS[p] || "#90a4ae";
+// 脚を使う有酸素(脚トレ要素として扱う)
+const LEGCARDIO=/ウォーキング|ランニング|ジョギング|登山|ハイキング|クロストレーナー|サイクリング|バイク|階段|ステア|トレッキング/;
 let rows = [], charts = {}, activePart = "すべて";
 
 // --- 引用符・改行対応のCSVパーサ ---
@@ -544,6 +546,7 @@ function loadCSV(text){
     vol:parseFloat(r[I.vol])||((parseFloat(r[I.wt])||0)*(parseFloat(r[I.reps])||0)),
     memo:(I.memo>=0?r[I.memo]:"")||""
   })).filter(r=>r.date&&r.ex);
+  rows.forEach(r=>r.legC=r.part==="有酸素"&&LEGCARDIO.test(r.ex));
   render();
 }
 
@@ -575,10 +578,10 @@ function render(){
     .map(s=>`<tr><td class="ex-name"><span class="tag" style="background:${colorOf(s.part)};margin-right:6px">${s.part}</span>${s.ex}</td><td style="text-align:center">${s.n}日</td><td>${s.wt}kg×${s.reps}<span class="e1"> ≈${Math.round(s.wt*(1+s.reps/30))}</span></td><td class="sets hs">${short(s.ld)} ${s.last}</td></tr>`);
   const cd={};
   rows.filter(r=>r.part==="有酸素").forEach(r=>{
-    if(!cd[r.ex]) cd[r.ex]={days:new Set(),min:0};
+    if(!cd[r.ex]) cd[r.ex]={days:new Set(),min:0,leg:r.legC};
     cd[r.ex].days.add(r.date); cd[r.ex].min+=r.min;
   });
-  Object.entries(cd).forEach(([ex,c])=>exRows.push(`<tr><td class="ex-name"><span class="tag" style="background:${colorOf("有酸素")};margin-right:6px">有酸素</span>${ex}</td><td style="text-align:center">${c.days.size}日</td><td>計${c.min}分</td><td class="sets hs">${short([...c.days].sort().pop())}</td></tr>`));
+  Object.entries(cd).forEach(([ex,c])=>exRows.push(`<tr><td class="ex-name"><span class="tag" style="background:${c.leg?"#66bb6a":colorOf("有酸素")};margin-right:6px">${c.leg?"脚(有酸素)":"有酸素"}</span>${ex}</td><td style="text-align:center">${c.days.size}日</td><td>計${c.min}分</td><td class="sets hs">${short([...c.days].sort().pop())}</td></tr>`));
   document.getElementById("exSummary").innerHTML=
     `<table><thead><tr><th>種目</th><th style="text-align:center">実施</th><th>ベスト</th><th class="hs">直近</th></tr></thead><tbody>${exRows.join("")}</tbody></table>`+
     `<div class="note">「≈」は推定1RM(1回だけ挙げられる重量の目安)</div>`;
@@ -602,9 +605,11 @@ function render(){
   // 日別×部位 積み上げ
   const sParts=parts.filter(p=>p!=="有酸素");
   const dsets=sParts.map(p=>({label:p,data:dates.map(d=>Math.round(rows.filter(r=>r.date===d&&r.part===p).reduce((s,r)=>s+r.vol,0))),backgroundColor:colorOf(p),stack:"v",borderRadius:3,yAxisID:"y"}));
-  // 有酸素(登山・ウォーキング等)は分数で右軸に表示
-  const cardioMinByDay=dates.map(d=>rows.filter(r=>r.date===d&&r.part==="有酸素").reduce((s,r)=>s+r.min,0));
-  if(cardioMinByDay.some(v=>v>0)) dsets.push({label:"有酸素(分)",data:cardioMinByDay,backgroundColor:"#4dd0e1",stack:"c",borderRadius:3,yAxisID:"y1"});
+  // 有酸素は分数で右軸に表示(登山・ウォーキング等の脚系は脚色で区別)
+  const legMin=dates.map(d=>rows.filter(r=>r.date===d&&r.legC).reduce((s,r)=>s+r.min,0));
+  const othMin=dates.map(d=>rows.filter(r=>r.date===d&&r.part==="有酸素"&&!r.legC).reduce((s,r)=>s+r.min,0));
+  if(legMin.some(v=>v>0)) dsets.push({label:"脚系有酸素(分)",data:legMin,backgroundColor:"#9ccc65",stack:"c",borderRadius:3,yAxisID:"y1"});
+  if(othMin.some(v=>v>0)) dsets.push({label:"有酸素(分)",data:othMin,backgroundColor:"#4dd0e1",stack:"c",borderRadius:3,yAxisID:"y1"});
   makeChart("volChart","bar",{labels:dates.map(short),datasets:dsets},
     {scales:{x:{stacked:true,grid:{display:false},ticks:{color:"#93a0b5"}},
       y:{stacked:true,grid:{color:"#2b354a"},ticks:{color:"#93a0b5"}},
@@ -653,7 +658,8 @@ function render(){
         ? er.map(r=>`${r.min}分${r.km?` / ${r.km}km`:""}`).join(", ")
         : er.map(r=>`${r.wt}kg×${r.reps}`).join(" , ");
       const v=Math.round(er.reduce((s,r)=>s+r.vol,0));
-      return `<tr><td class="ex-name"><span class="tag" style="background:${colorOf(p)};margin-right:6px">${p}</span>${e}</td><td class="sets">${setsTxt}</td><td class="vol">${p==="有酸素"?"-":fmt(v)+" kg"}</td></tr>`;
+      const tagL=er[0].legC?"脚(有酸素)":p, tagC=er[0].legC?"#66bb6a":colorOf(p);
+      return `<tr><td class="ex-name"><span class="tag" style="background:${tagC};margin-right:6px">${tagL}</span>${e}</td><td class="sets">${setsTxt}</td><td class="vol">${p==="有酸素"?"-":fmt(v)+" kg"}</td></tr>`;
     }).join("");
     const el=document.createElement("div");
     el.className="day"+(di===0?" open":"");

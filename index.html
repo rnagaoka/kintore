@@ -155,7 +155,7 @@
 </div>
 
 <div class="panel">
-  <h2>日別トレーニングボリューム(部位別)</h2>
+  <h2>日別トレーニングボリューム(棒=kg / 水色=有酸素 分)</h2>
   <div class="chart-wrap"><canvas id="volChart"></canvas></div>
 </div>
 
@@ -601,9 +601,15 @@ function render(){
 
   // 日別×部位 積み上げ
   const sParts=parts.filter(p=>p!=="有酸素");
-  const dsets=sParts.map(p=>({label:p,data:dates.map(d=>Math.round(rows.filter(r=>r.date===d&&r.part===p).reduce((s,r)=>s+r.vol,0))),backgroundColor:colorOf(p),stack:"v",borderRadius:3}));
+  const dsets=sParts.map(p=>({label:p,data:dates.map(d=>Math.round(rows.filter(r=>r.date===d&&r.part===p).reduce((s,r)=>s+r.vol,0))),backgroundColor:colorOf(p),stack:"v",borderRadius:3,yAxisID:"y"}));
+  // 有酸素(登山・ウォーキング等)は分数で右軸に表示
+  const cardioMinByDay=dates.map(d=>rows.filter(r=>r.date===d&&r.part==="有酸素").reduce((s,r)=>s+r.min,0));
+  if(cardioMinByDay.some(v=>v>0)) dsets.push({label:"有酸素(分)",data:cardioMinByDay,backgroundColor:"#4dd0e1",stack:"c",borderRadius:3,yAxisID:"y1"});
   makeChart("volChart","bar",{labels:dates.map(short),datasets:dsets},
-    {scales:{x:{stacked:true,grid:{display:false},ticks:{color:"#93a0b5"}},y:{stacked:true,grid:{color:"#2b354a"},ticks:{color:"#93a0b5"}}},plugins:{legend:{labels:{color:"#e8ecf4",boxWidth:12}}}});
+    {scales:{x:{stacked:true,grid:{display:false},ticks:{color:"#93a0b5"}},
+      y:{stacked:true,grid:{color:"#2b354a"},ticks:{color:"#93a0b5"}},
+      y1:{position:"right",grid:{display:false},ticks:{color:"#4dd0e1"}}},
+     plugins:{legend:{labels:{color:"#e8ecf4",boxWidth:12}}}});
 
   // 部位別ドーナツ
   const pVol=sParts.map(p=>Math.round(rows.filter(r=>r.part===p).reduce((s,r)=>s+r.vol,0)));
@@ -791,14 +797,14 @@ function renderAnalysis(dates){
 function drawEx(ex,dates){
   const ds=dates.filter(d=>rows.some(r=>r.date===d&&r.ex===ex));
   const maxWt=ds.map(d=>Math.max(...rows.filter(r=>r.date===d&&r.ex===ex).map(r=>r.wt)));
-  const vol=ds.map(d=>Math.round(rows.filter(r=>r.date===d&&r.ex===ex).reduce((s,r)=>s+r.vol,0)));
+  // 推定1RM: その日のベストセットから換算(Epley式・高回数は12回で頭打ち)
+  const e1=ds.map(d=>Math.round(Math.max(...rows.filter(r=>r.date===d&&r.ex===ex).map(r=>r.wt*(1+Math.min(r.reps,12)/30)))));
   makeChart("exChart","line",{labels:ds.map(short),datasets:[
-    {label:"最大重量(kg)",data:maxWt,borderColor:"#4f8ef7",backgroundColor:"#4f8ef7",tension:.3,yAxisID:"y"},
-    {label:"総ボリューム(kg)",data:vol,borderColor:"#ffb74d",backgroundColor:"#ffb74d",borderDash:[5,4],tension:.3,yAxisID:"y1"}
+    {label:"トップ重量(kg)",data:maxWt,borderColor:"#4f8ef7",backgroundColor:"#4f8ef7",tension:.3},
+    {label:"推定1RM(kg)",data:e1,borderColor:"#ffb74d",backgroundColor:"#ffb74d",borderDash:[5,4],tension:.3}
   ]},{scales:{
     x:{grid:{display:false},ticks:{color:"#93a0b5"}},
-    y:{position:"left",grid:{color:"#2b354a"},ticks:{color:"#4f8ef7"}},
-    y1:{position:"right",grid:{display:false},ticks:{color:"#ffb74d"}}
+    y:{grid:{color:"#2b354a"},ticks:{color:"#93a0b5"}}
   },plugins:{legend:{labels:{color:"#e8ecf4",boxWidth:12}}}});
 }
 

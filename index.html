@@ -98,6 +98,7 @@
     .chip{padding:4px 11px;font-size:.78rem}
     footer{font-size:.65rem}
     .hs{display:none}
+    .pr{font-size:.72rem;padding:6px 9px}
   }
   .grade{display:flex;align-items:center;gap:14px;margin-bottom:14px}
   .grade-badge{font-size:2rem;font-weight:800;width:64px;height:64px;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0}
@@ -116,15 +117,27 @@
   .mini-item:last-child{border-bottom:none}
   .mini-item .ic{flex-shrink:0}
   .mi-d{color:var(--sub);font-size:.78rem;margin-top:1px}
+  .prs{display:flex;flex-wrap:wrap;gap:8px}
+  .pr{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:7px 12px;font-size:.8rem;display:flex;align-items:center;gap:6px}
+  .pr .pr-d{color:var(--sub);font-size:.7rem}
+  .e1{color:var(--sub);font-size:.72rem}
+  .note{color:var(--sub);font-size:.7rem;margin-top:6px}
 </style>
 </head>
 <body>
 <h1>🏋️ 筋トレ記録ダッシュボード</h1>
 <div class="sub" id="period"></div>
 
-<label id="drop">📂 タップしてCSVを選択(PCはドラッグ&ドロップも可)。アプリの「メールで送る」の添付CSVは、長押し→「"ファイル"に保存」してからここで選択
+<label id="drop">
+  <div style="font-size:1rem;font-weight:700;color:var(--accent)">📂 記録CSVを読み込む</div>
+  <div style="font-size:.76rem;margin-top:4px;line-height:1.6">ここをタップしてファイルを選択(PCはドラッグ&ドロップ可)<br>アプリの「メールで送る」→ 添付CSVを「ファイルに保存」→ ここで選択</div>
   <input type="file" accept=".csv,text/csv,text/comma-separated-values,application/csv">
 </label>
+
+<div class="panel">
+  <h2>🏆 自己ベスト更新</h2>
+  <div class="prs" id="prList"></div>
+</div>
 
 <div class="panel">
   <h2>🏋️ よくやっているトレーニング</h2>
@@ -494,7 +507,7 @@ function render(){
     const rp=Math.max(...dr.filter(r=>r.wt===w).map(r=>r.reps));
     return {...s,n:s.days.size,ld,last:`${w}kg×${rp}`};
   }).sort((a,b)=>b.n-a.n||b.wt-a.wt).slice(0,10)
-    .map(s=>`<tr><td class="ex-name"><span class="tag" style="background:${colorOf(s.part)};margin-right:6px">${s.part}</span>${s.ex}</td><td style="text-align:center">${s.n}日</td><td>${s.wt}kg×${s.reps}</td><td class="sets hs">${short(s.ld)} ${s.last}</td></tr>`);
+    .map(s=>`<tr><td class="ex-name"><span class="tag" style="background:${colorOf(s.part)};margin-right:6px">${s.part}</span>${s.ex}</td><td style="text-align:center">${s.n}日</td><td>${s.wt}kg×${s.reps}<span class="e1"> ≈${Math.round(s.wt*(1+s.reps/30))}</span></td><td class="sets hs">${short(s.ld)} ${s.last}</td></tr>`);
   const cd={};
   rows.filter(r=>r.part==="有酸素").forEach(r=>{
     if(!cd[r.ex]) cd[r.ex]={days:new Set(),min:0};
@@ -502,7 +515,22 @@ function render(){
   });
   Object.entries(cd).forEach(([ex,c])=>exRows.push(`<tr><td class="ex-name"><span class="tag" style="background:${colorOf("有酸素")};margin-right:6px">有酸素</span>${ex}</td><td style="text-align:center">${c.days.size}日</td><td>計${c.min}分</td><td class="sets hs">${short([...c.days].sort().pop())}</td></tr>`));
   document.getElementById("exSummary").innerHTML=
-    `<table><thead><tr><th>種目</th><th style="text-align:center">実施</th><th>ベスト</th><th class="hs">直近</th></tr></thead><tbody>${exRows.join("")}</tbody></table>`;
+    `<table><thead><tr><th>種目</th><th style="text-align:center">実施</th><th>ベスト</th><th class="hs">直近</th></tr></thead><tbody>${exRows.join("")}</tbody></table>`+
+    `<div class="note">「≈」は推定1RM(1回だけ挙げられる重量の目安)</div>`;
+
+  // 自己ベスト更新(その日のトップ重量が過去最高を超えた記録)
+  const prs=[],best={};
+  dates.forEach(d=>{
+    const byEx={};
+    strength.filter(r=>r.date===d).forEach(r=>{ if(!byEx[r.ex]||r.wt>byEx[r.ex].wt) byEx[r.ex]=r; });
+    Object.values(byEx).forEach(r=>{
+      if(best[r.ex]===undefined) best[r.ex]=r.wt;
+      else if(r.wt>best[r.ex]){ prs.push(r); best[r.ex]=r.wt; }
+    });
+  });
+  document.getElementById("prList").innerHTML=
+    prs.slice(-8).reverse().map(r=>`<div class="pr"><span class="tag" style="background:${colorOf(r.part)}">${r.part}</span><strong>${r.ex}</strong> ${r.wt}kg×${r.reps}<span class="pr-d">${short(r.date)}</span></div>`).join("")
+    ||`<div class="mi-d">この期間の更新はなし。「これからやること」を実行して更新を狙おう。</div>`;
 
   renderAnalysis(dates);
 
@@ -590,6 +618,9 @@ function renderAnalysis(dates){
   const weeks=Math.max(spanDays/7,1);
   const freq=dates.length/weeks;
   const gaps=[];for(let i=1;i<dates.length;i++)gaps.push((new Date(dates[i])-new Date(dates[i-1]))/864e5);
+  // 脚を使う有酸素(ウォーキング・ランニング・登山など)は脚トレ相当として一部加算
+  const LEGC=/ウォーキング|ランニング|ジョギング|登山|ハイキング|クロストレーナー|サイクリング|バイク|階段|ステア|トレッキング/;
+  const legCardioWk=rows.filter(r=>r.part==="有酸素"&&LEGC.test(r.ex)).reduce((s,r)=>s+r.min,0)/weeks;
 
   // 頻度・継続
   if(freq>=2.5) goods.push({t:`週${freq.toFixed(1)}回のペースを維持`,d:"筋肥大に十分な頻度。この継続力が最大の資産。"});
@@ -609,10 +640,11 @@ function renderAnalysis(dates){
 
   // 部位別 週セット数
   const PARTS=["胸","背中","肩","腕","脚"];
-  const setsWk=p=>st.filter(r=>r.part===p).length/weeks;
-  balEl.innerHTML=`<h3 class="mini">部位別・週あたりセット数(発達の目安: 10set以上)</h3><div class="balance">`+
+  const setsWk=p=>st.filter(r=>r.part===p).length/weeks+(p==="脚"?legCardioWk/15:0);
+  balEl.innerHTML=`<h3 class="mini">部位別の週セット数(目安10以上)</h3><div class="balance">`+
     PARTS.map(p=>{const s=setsWk(p),c=s>=10?"#66bb6a":s>=5?"#ffb74d":"#ef5350",m=s>=10?"◎ 十分":s>=5?"△ やや不足":"✕ 不足";
-      return `<div class="b-chip" style="border-color:${c}"><span class="p">${p}</span><span class="v">${s.toFixed(1)}<small style="color:var(--sub);font-weight:400"> set</small></span><span class="s" style="color:${c}">${m}</span></div>`;}).join("")+`</div>`;
+      return `<div class="b-chip" style="border-color:${c}"><span class="p">${p}</span><span class="v">${s.toFixed(1)}<small style="color:var(--sub);font-weight:400"> set</small></span><span class="s" style="color:${c}">${m}</span></div>`;}).join("")+`</div>`+
+    (legCardioWk>0?`<div class="note">※脚にはウォーキング等の有酸素 週${Math.round(legCardioWk)}分を${(legCardioWk/15).toFixed(1)}set相当として加算済み</div>`:"");
   const low=PARTS.filter(p=>setsWk(p)<5), mid=PARTS.filter(p=>setsWk(p)>=5&&setsWk(p)<10);
   if(!low.length&&!mid.length) goods.push({t:"全部位が週10set以上",d:"部位バランスは理想的。"});
   if(low.length) issues.push({t:`${low.join("・")}が週5set未満`,d:"発達がほぼ見込めない水準。ローテーションに固定枠が必要。"});
